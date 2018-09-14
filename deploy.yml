@@ -1,0 +1,70 @@
+- hosts: localhost
+  become: false
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: ensure regular ec2 instance is launched
+      ec2:
+        region: "eu-west-1"
+        key_name: "{{ ec2_key_name }}"
+        instance_type: "t3.medium"
+        image: "ami-0181f8d9b6f098ec4"
+        wait: "yes"
+        group_id: "{{ ec2_security_group_id }}"
+        vpc_subnet_id: "{{ ec2_subnet_id }}"
+        ebs_optimized: "false"
+        instance_tags:
+          name: "rundeck"
+        exact_count: 1
+        count_tag:
+          name: "rundeck"
+        volumes:
+          - device_name: "/dev/sda1"
+            volume_type: gp2
+            volume_size: "20"
+            delete_on_termination: true
+      register: ec2_info
+
+    - debug:
+        msg: "{{ item.public_ip }}"
+      with_items: "{{ ec2_info.tagged_instances }}"
+
+    - name: Add instances to host group
+      add_host: hostname={{ item.public_ip }} groupname=ec2hosts
+      with_items: "{{ ec2_info.tagged_instances }}"
+      changed_when: false
+
+    - name: Wait for SSH to come up
+      wait_for: host={{ item.public_dns_name }} port=22 timeout=320 state=started
+      with_items: "{{ ec2_info.tagged_instances }}"
+
+- hosts: ec2hosts
+  user: ubuntu
+  become: true
+  gather_facts: false
+  vars:
+    rundeck_deb: "rundeck_2.11.5-1-GA_all.deb"
+    max_heap_size: 1536
+    min_heap_size: 256
+  pre_tasks:
+    - raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+      changed_when: false
+    - setup:  # Gather facts after python is installed
+    - name: get public hostname
+      uri:
+        url: "http://169.254.169.254/latest/meta-data/public-hostname/"
+        return_content: "yes"
+      register: public_hostname
+    - set_fact:
+        rundeck_url: "http://{{ public_hostname.content }}:4440"
+        rundeck_server_name: "{{ public_hostname.content }}"
+  roles:
+    - rundeck
+  post_tasks:
+    - name: wait for rundeck server to come up
+      wait_for:
+        port: 4440
+        host: "{{ ansible_default_ipv4.address }}"
+    - name: connect to this
+      debug:
+        msg: "{{ rundeck_url }}"

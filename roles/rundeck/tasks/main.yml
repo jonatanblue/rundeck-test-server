@@ -1,0 +1,45 @@
+- name: ensure java 8 is latest
+  apt:
+    name: "openjdk-8-jdk-headless"
+    state: "latest"
+    update_cache: "yes"
+
+- name: ensure deb is downloaded
+  get_url:
+    url: "http://dl.bintray.com/rundeck/rundeck-deb/{{ rundeck_deb }}"
+    dest: "/tmp/{{ rundeck_deb }}"
+
+- name: make deb runnable
+  file:
+    path: "/tmp/{{ rundeck_deb }}"
+    state: "file"
+    mode: "0700"
+
+- name: ensure rundeck is installed
+  apt: deb="/tmp/{{ rundeck_deb }}" state=present
+
+- name: ensure rundeckd is started
+  service: name=rundeckd state=started
+
+- name: ensure hostname is added to hosts file
+  lineinfile: dest=/etc/hosts regexp="^{{ ansible_default_ipv4.address }}" line="{{ ansible_default_ipv4.address }} {{ ansible_hostname }}"
+  tags: hostname_in_hosts_file
+
+- name: ensure config templates are uploaded
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/rundeck/{{ item }}"
+    owner: "rundeck"
+    group: "rundeck"
+  with_items:
+    - "profile"
+  notify: restart rundeck
+
+- name: ensure properties files are uploaded
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/rundeck/{{ item }}"
+  with_items:
+    - "framework.properties"
+    - "rundeck-config.properties"
+  notify: restart rundeck
