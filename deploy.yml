@@ -5,9 +5,9 @@
   tasks:
     - name: ensure regular ec2 instance is launched
       ec2:
-        region: "eu-west-1"
+        region: "{{ aws_region }}"
         key_name: "{{ ec2_key_name }}"
-        instance_type: "t3.medium"
+        instance_type: "t3.micro"
         image: "ami-0181f8d9b6f098ec4"
         wait: "yes"
         group_id: "{{ ec2_security_group_id }}"
@@ -90,5 +90,23 @@
 
     - debug: var=out.stderr_lines
 
-    - fail: this fails if the test playbook failed
+    - name: get instance id
+      uri:
+        url: "http://169.254.169.254/latest/meta-data/instance-id/"
+        return_content: "yes"
+      register: instance_id
+
+    - name: terminate instance
+      ec2:
+        instance_ids: "{{ instance_id.content }}"
+        aws_region: "{{ aws_region }}"
+        state: absent
+        wait: yes
+      delegate_to: localhost
+      become: false
+
+    - name: this fails if the test playbook failed
+      fail:
+        msg: "test playbook failed. check debug output above for details."
       when: out.rc != 0
+      delegate_to: localhost
