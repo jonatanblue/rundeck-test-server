@@ -1,0 +1,50 @@
+- hosts: all
+  connection: local
+  vars:
+    file_name: "backup-test.tar.gz"
+    backup_dir: "/tmp"
+    backup_file: "{{ backup_dir }}/{{ file_name }}"
+  tasks:
+    - name: get backup and restore tool
+      git:
+        repo: https://github.com/jonatanblue/rundeck-backup-restore.git
+        dest: /tmp/rundeck-backup-restore
+        force: yes
+
+    - name: remove any existing backup file
+      file:
+        path: "{{ backup_file }}"
+        state: absent
+
+    - name: take backup
+      command: "/tmp/rundeck-backup-restore/keeper.py backup --dest {{ backup_dir }} --filename {{ file_name }} --ignore-running"
+
+    - name: test that server can still be accessed
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:4440"
+
+    - name: ensure rundeckd is stopped
+      service:
+        name: rundeckd
+        state: stopped
+
+    - name: remove all files before restoring
+      shell: "tar -tvf {{ backup_file }} |  awk '{ print $6 }' | xargs -n1 -I% file /% | grep -v 'No such file' | grep -v directory | cut -d: -f1 | xargs rm -f"
+
+    - name: restore from backup
+      command: "/tmp/rundeck-backup-restore/keeper.py restore --file {{ backup_file }}"
+
+    - name: start rundeck again
+      service:
+        name: rundeckd
+        state: started
+
+    - name: wait for rundeck server to come up
+      wait_for:
+        port: 4440
+        host: "{{ ansible_default_ipv4.address }}"
+        timeout: 90
+
+    - name: test that server can still be accessed
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:4440"

@@ -1,6 +1,6 @@
 # Rundeck test server
 
-Deploy a Rundeck test server on AWS using Ansible.
+Deploy a Rundeck server on AWS using Ansible and run integration tests for [rundeck-backup-restore](https://github.com/jonatanblue/rundeck-backup-restore).
 
 Ensure that your AWS access keys are in `~/.aws/credentials`:
 

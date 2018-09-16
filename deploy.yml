@@ -65,6 +65,30 @@
       wait_for:
         port: 4440
         host: "{{ ansible_default_ipv4.address }}"
+        timeout: 90
     - name: connect to this
       debug:
         msg: "{{ rundeck_url }}"
+
+    - name: upload test playbook
+      copy:
+        src: tests.yml
+        dest: /tmp/
+
+    - name: install ansible
+      apt:
+        name: ansible
+        state: latest
+
+    - name: run test playbook
+      command:
+        ansible-playbook -i "localhost," /tmp/tests.yml
+      ignore_errors: yes
+      register: out
+
+    - debug: var=out.stdout_lines
+
+    - debug: var=out.stderr_lines
+
+    - fail: this fails if the test playbook failed
+      when: out.rc != 0
