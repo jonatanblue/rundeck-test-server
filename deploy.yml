@@ -3,6 +3,27 @@
   connection: local
   gather_facts: false
   tasks:
+    - name: get current public ip as seen by aws
+      uri:
+        url: http://checkip.amazonaws.com
+        return_content: yes
+      register: ip
+    - name: create security group
+      ec2_group:
+        name: "rundeck-test-server-sg"
+        description: "test"
+        vpc_id: "{{ ec2_vpc_id }}"
+        region: "{{ aws_region }}"
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: "{{ ip.content | trim }}/32"
+          - proto: tcp
+            from_port: 4440
+            to_port: 4440
+            cidr_ip: "{{ ip.content | trim }}/32"
+      register: sg
     - name: ensure regular ec2 instance is launched
       ec2:
         region: "{{ aws_region }}"
@@ -10,7 +31,7 @@
         instance_type: "t3.micro"
         image: "ami-0181f8d9b6f098ec4"
         wait: "yes"
-        group_id: "{{ ec2_security_group_id }}"
+        group_id: "{{ sg.group_id }}"
         vpc_subnet_id: "{{ ec2_subnet_id }}"
         ebs_optimized: "false"
         instance_tags:
@@ -24,19 +45,18 @@
             volume_size: "20"
             delete_on_termination: true
       register: ec2_info
-
-    - debug:
-        msg: "{{ item.public_ip }}"
-      with_items: "{{ ec2_info.tagged_instances }}"
+      no_log: true
 
     - name: Add instances to host group
       add_host: hostname={{ item.public_ip }} groupname=ec2hosts
       with_items: "{{ ec2_info.tagged_instances }}"
       changed_when: false
+      no_log: true
 
     - name: Wait for SSH to come up
-      wait_for: host={{ item.public_dns_name }} port=22 timeout=320 state=started
+      wait_for: host={{ item.public_ip }} port=22 timeout=320 state=started
       with_items: "{{ ec2_info.tagged_instances }}"
+      no_log: true
 
 - hosts: ec2hosts
   user: ubuntu
@@ -55,9 +75,11 @@
         url: "http://169.254.169.254/latest/meta-data/public-hostname/"
         return_content: "yes"
       register: public_hostname
+      no_log: true
     - set_fact:
         rundeck_url: "http://{{ public_hostname.content }}:4440"
         rundeck_server_name: "{{ public_hostname.content }}"
+      no_log: true
   roles:
     - rundeck
   post_tasks:
@@ -66,9 +88,11 @@
         port: 4440
         host: "{{ ansible_default_ipv4.address }}"
         timeout: 90
+      no_log: true
     - name: connect to this
       debug:
         msg: "{{ rundeck_url }}"
+      no_log: true
 
     - name: upload test playbook
       copy:
@@ -95,6 +119,7 @@
         url: "http://169.254.169.254/latest/meta-data/instance-id/"
         return_content: "yes"
       register: instance_id
+      no_log: true
 
     - name: terminate instance
       ec2:
@@ -104,6 +129,21 @@
         wait: yes
       delegate_to: localhost
       become: false
+      tags:
+        - terminate
+      no_log: true
+
+    - name: remove security group
+      ec2_group:
+        name: rundeck-test-server-sg
+        description: "test"
+        vpc_id: "{{ ec2_vpc_id }}"
+        region: "{{ aws_region }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      tags:
+        - terminate
 
     - name: this fails if the test playbook failed
       fail:
